@@ -3,12 +3,13 @@
 <p>
 gRPC to JSON proxy generator following the gRPC HTTP spec
 </p>
-<a href="https://circleci.com/gh/grpc-ecosystem/grpc-gateway"><img src="https://img.shields.io/circleci/build/github/grpc-ecosystem/grpc-gateway?color=379c9c&logo=circleci&logoColor=ffffff&style=flat-square"/></a>
-<a href="https://codecov.io/gh/grpc-ecosystem/grpc-gateway"><img src="https://img.shields.io/codecov/c/github/grpc-ecosystem/grpc-gateway?color=379c9c&logo=codecov&logoColor=ffffff&style=flat-square"/></a>
+<a href="https://github.com/grpc-ecosystem/grpc-gateway/actions/workflows/master.yml"><img src="https://img.shields.io/github/workflow/status/grpc-ecosystem/grpc-gateway/master?color=379c9c&label=build&logo=github&logoColor=ffffff&style=flat-square"/></a>
 <a href="https://app.slack.com/client/T029RQSE6/CBATURP1D"><img src="https://img.shields.io/badge/slack-grpc--gateway-379c9c?logo=slack&logoColor=ffffff&style=flat-square"/></a>
 <a href="https://github.com/grpc-ecosystem/grpc-gateway/blob/master/LICENSE.txt"><img src="https://img.shields.io/github/license/grpc-ecosystem/grpc-gateway?color=379c9c&style=flat-square"/></a>
 <a href="https://github.com/grpc-ecosystem/grpc-gateway/releases"><img src="https://img.shields.io/github/v/release/grpc-ecosystem/grpc-gateway?color=379c9c&logoColor=ffffff&style=flat-square"/></a>
 <a href="https://github.com/grpc-ecosystem/grpc-gateway/stargazers"><img src="https://img.shields.io/github/stars/grpc-ecosystem/grpc-gateway?color=379c9c&style=flat-square"/></a>
+<a href="https://slsa.dev/images/gh-badge-level3.svg"><img src="https://slsa.dev/images/gh-badge-level3.svg"/></a>
+
 </div>
 
 ## About
@@ -56,6 +57,7 @@ that's needed to generate a reverse-proxy with this library.
 
 ## Installation
 
+### Compile from source
 The following instructions assume you are using
 [Go Modules](https://github.com/golang/go/wiki/Modules) for dependency
 management. Use a
@@ -93,6 +95,17 @@ This will place four binaries in your `$GOBIN`;
 - `protoc-gen-go-grpc`
 
 Make sure that your `$GOBIN` is in your `$PATH`.
+
+### Download the binaries
+
+You may alternatively download the binaries from the [GitHub releases page](https://github.com/grpc-ecosystem/grpc-gateway/releases/latest).
+We generate [SLSA3 signatures](slsa.dev) using the OpenSSF's [slsa-framework/slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator) during the release process. To verify a release binary:
+1. Install the verification tool from [slsa-framework/slsa-verifier#installation](https://github.com/slsa-framework/slsa-verifier#installation).
+2. Download the provenance file `attestation.intoto.jsonl` from the [GitHub releases page](https://github.com/grpc-ecosystem/grpc-gateway/releases/latest).
+3. Run the verifier:
+```shell
+slsa-verifier -artifact-path <the-binary> -provenance attestation.intoto.jsonl -source github.com/grpc-ecosystem/grpc-gateway -tag <the-tag>
+```
 
 Alternatively, see the section on remotely managed plugin versions below.
 
@@ -273,7 +286,7 @@ Alternatively, see the section on remotely managed plugin versions below.
 
    ```
    google/api/annotations.proto
-   google/api/field_behaviour.proto
+   google/api/field_behavior.proto
    google/api/http.proto
    google/api/httpbody.proto
    ```
@@ -341,6 +354,7 @@ Alternatively, see the section on remotely managed plugin versions below.
      "github.com/golang/glog"
      "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
      "google.golang.org/grpc"
+     "google.golang.org/grpc/credentials/insecure"
 
      gw "github.com/yourorg/yourrepo/proto/gen/go/your/service/v1/your_service"  // Update
    )
@@ -359,7 +373,7 @@ Alternatively, see the section on remotely managed plugin versions below.
      // Register gRPC server endpoint
      // Note: Make sure the gRPC server is running properly and accessible
      mux := runtime.NewServeMux()
-     opts := []grpc.DialOption{grpc.WithInsecure()}
+     opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
      err := gw.RegisterYourServiceHandlerFromEndpoint(ctx, mux,  *grpcServerEndpoint, opts)
      if err != nil {
        return err
@@ -428,6 +442,19 @@ Alternatively, see the section on remotely managed plugin versions below.
 
    Note that this plugin also supports generating OpenAPI definitions for unannotated methods;
    use the `generate_unbound_methods` option to enable this.
+
+   It is possible with the HTTP mapping for a gRPC service method to create duplicate mappings
+   with the only difference being constraints on the path parameter.
+
+   `/v1/{name=projects/*}` and `/v1/{name=organizations/*}` both become `/v1/{name}`.  When
+   this occurs the plugin will rename the path parameter with a "_1" (or "_2" etc) suffix
+   to differentiate the different operations. So in the above example, the 2nd path would become
+   `/v1/{name_1=organizations/*}`.  This can also cause OpenAPI clients to URL encode the "/" that is
+   part of the path parameter as that is what OpenAPI defines in the specification.  To allow gRPC gateway to
+   accept the URL encoded slash and still route the request, use the UnescapingModeAllCharacters or
+   UnescapingModeLegacy (which is the default currently though may change in future versions). See
+   [Customizing Your Gateway](https://grpc-ecosystem.github.io/grpc-gateway/docs/mapping/customizing_your_gateway/)
+   for more information.
 
 ## Usage with remote plugins
 
@@ -564,13 +591,15 @@ But patches are welcome.
 - HTTP request host is added as `X-Forwarded-Host` gRPC request header.
 - HTTP `Authorization` header is added as `authorization` gRPC request header.
 - Remaining Permanent HTTP header keys (as specified by the IANA
-  [here](http://www.iana.org/assignments/message-headers/message-headers.xhtml)
+  [here](http://www.iana.org/assignments/message-headers/message-headers.xhtml))
   are prefixed with `grpcgateway-` and added with their values to gRPC request
   header.
 - HTTP headers that start with 'Grpc-Metadata-' are mapped to gRPC metadata
   (prefixed with `grpcgateway-`).
 - While configurable, the default {un,}marshaling uses
   [protojson](https://pkg.go.dev/google.golang.org/protobuf/encoding/protojson).
+- The path template used to map gRPC service methods to HTTP endpoints supports the [google.api.http](https://github.com/googleapis/googleapis/blob/master/google/api/http.proto)
+  path template syntax. For example, `/api/v1/{name=projects/*/topics/*}` or `/prefix/{path=organizations/**}`.
 
 ## Contribution
 
